@@ -56,17 +56,32 @@ for disk in $DISKS; do
   # only consider block devices
   [ -b "$disk" ] || continue
 
-  # get the "Next check after date" on ext filesystems
-  date="$(tune2fs -l "$disk" |awk -F': ' '/^Next/ { print $2 }')"
+  flag=false
+  tune2fs="$(tune2fs -l "$disk")"
 
-  # if the line isn't present, no check will be performed, thus conitnue
-  [ "$date" != "" ] || continue
+  # get the "Next check after date"
+  date="$(echo "$tune2fs" | awk -F': ' '/^Next/ { print $2 }')"
+  if [ "$date" != "" ]; then
+    # reformat to seconds since epoch
+    date="$(date +%s --date="$date")"
 
-  # reformat to seconds since epoch
-  date="$(date +%s --date="$date")"
+    # flag disk if next check date has passed
+    if [ $date -le $curdate ]; then
+      flag=true
+    fi
+  fi
 
-  # append to array if next check date has passed
-  if [ $date -le $curdate ]; then
+  # check the mount count and its limit
+  mountcount="$(echo "$tune2fs" | awk -F': ' '/^Mount count/ { print $2 }')"
+  maxmountcount="$(echo "$tune2fs" | awk -F': ' '/^Maximum mount/ { print $2 }')"
+  if [ -n "$maxmountcount" \
+       -a "$maxmountcount" -gt 0 \
+       -a "$mountcount" -ge "$maxmountcount" ]; then
+    flag=true
+  fi
+
+  # append disk to array if it will be checked
+  if $flag; then
     WILL_BE_CHECKED=( "${WILL_BE_CHECKED[@]}" "$disk" )
   fi
 done
