@@ -1,0 +1,93 @@
+#!/bin/bash
+#
+# 20-fsck - checks if any device is to be fsck'ed after the reboot
+#
+# currently only supports ext[234] filesystems
+#
+# Copyright (c) 2013 Jan-Philipp "jplitza" Litza <janphilipp@litza.de>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+[ -f "$MOLLYGUARD_SETTINGS" ] && . "$MOLLYGUARD_SETTINGS"
+
+# check if we actually are on a terminal
+PTS=$(readlink /proc/$$/fd/0)
+case "$PTS" in
+  /dev/pts*|/dev/tty*)
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+
+# get the devices to every ext filesystem that is configured to be checked
+DISKS="$(awk '/^[^#]/ { if($6 != "0" && $3 ~ /^ext[2-9]$/) print $1 }' < /etc/fstab)"
+WILL_BE_CHECKED=( )
+
+curdate="$(date +%s)"
+
+for disk in $DISKS; do
+  # resolve special LABEL= and UUID= formats
+  case "$disk" in
+    UUID=*)
+      disk=/dev/disk/by-uuid/${disk#UUID=}
+      ;;
+    LABEL=*)
+      disk=/dev/disk/by-label/${disk#LABEL=}
+      ;;
+  esac
+
+  # only consider block devices
+  [ -b "$disk" ] || continue
+
+  # get the "Next check after date" on ext filesystems
+  date="$(tune2fs -l "$disk" |awk -F': ' '/^Next/ { print $2 }')"
+
+  # if the line isn't present, no check will be performed, thus conitnue
+  [ "$date" != "" ] || continue
+
+  # reformat to seconds since epoch
+  date="$(date +%s --date="$date")"
+
+  # append to array if next check date has passed
+  if [ $date -le $curdate ]; then
+    WILL_BE_CHECKED=( "${WILL_BE_CHECKED[@]}" "$disk" )
+  fi
+done
+
+if [ "${#WILL_BE_CHECKED[@]}" -gt 0 ]; then
+  echo "WARNING: The following disks will be checked for errors after reboot:"
+  for disk in "${WILL_BE_CHECKED[@]}"; do
+    echo "  $disk"
+  done
+  echo "You might want to check them manually beforehand to reduce downtime."
+  echo -n "$MOLLYGUARD_CMD nonetheless? "
+  read really
+  case "$really" in
+    [yY]*)
+      exit 0
+      ;;
+    *)
+      echo "Okay, won't $MOLLYGUARD_CMD."
+      exit 1
+      ;;
+  esac
+fi
+
+exit 0
