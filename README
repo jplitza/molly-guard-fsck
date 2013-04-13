@@ -1,0 +1,7 @@
+This little script can be used together with molly-guard, a software that
+executes hooks before shutting down or rebooting a Linux machine.
+
+When copied to /etc/molly-guard/run.d, it will check if any ext-filesystem
+is scheduled to be checked at the next boot. This would make the boot last
+longer and thus may result in a longer downtime. Thus it then suggests to
+manually check those filesystems beforehand.
